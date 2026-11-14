@@ -1,0 +1,14 @@
+[project]
+name = "gaming-analytics-data-lake"
+version = "0.1.0"
+description = "Add your description here"
+authors = [{ name = "Fallbringer9" }]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+gaming-analytics-data-lake = "gaming_analytics_data_lake:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
