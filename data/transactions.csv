@@ -1,0 +1,7 @@
+transaction_id,player_id,transaction_type,amount,status,created_at,updated_at
+T001,P001,deposit,100.00,completed,2026-11-03T09:00:00Z,2026-11-03T09:00:00Z
+T002,P001,withdrawal,30.00,completed,2026-11-03T10:00:00Z,2026-11-03T10:00:00Z
+T003,P001,deposit,50.00,failed,2026-11-03T11:00:00Z,2026-11-03T11:00:00Z
+T004,P002,deposit,20.00,completed,2026-11-03T09:00:00Z,2026-11-03T09:00:00Z
+T005,P002,withdrawal,35.00,completed,2026-11-03T10:00:00Z,2026-11-03T10:00:00Z
+T006,P002,withdrawal,10.00,failed,2026-11-03T11:00:00Z,2026-11-03T11:00:00Z
