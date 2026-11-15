@@ -1,5 +1,7 @@
 # Gaming Analytics Data Lake
 
+J’ai réalisé ce projet dans une démarche pédagogique pour approfondir mes connaissances en data engineering et développer ma capacité à travailler en collaboration avec un agent Codex.
+
 Data lake AWS pour analyser des transactions de jeu synthétiques. La V1 traite des lots CSV, conserve la dernière version valide de chaque transaction et expose des indicateurs financiers par joueur et par jour dans Athena.
 
 ## Architecture V1
