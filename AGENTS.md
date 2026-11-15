@@ -13,6 +13,8 @@
 
 ## Accès AWS
 
+- Utiliser le skill Codex `aws-terraform-deployment` avant chaque déploiement Terraform sur AWS. S’il n’est pas disponible dans le catalogue, lire `~/.codex/skills/aws-terraform-deployment/SKILL.md` sur cette machine.
+
 - Pour les commandes AWS locales, utiliser le profil `admin-bootstrap` et la région `eu-west-3`. Passer explicitement `--profile admin-bootstrap --region eu-west-3` aux commandes AWS CLI.
 - Garder les identifiants, les clés et les jetons AWS hors du dépôt et des sorties partagées.
 
