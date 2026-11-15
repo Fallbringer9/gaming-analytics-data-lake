@@ -15,11 +15,20 @@ infra/
     │   ├── main.tf         # Bucket privé, chiffrement au repos et HTTPS obligatoire
     │   ├── outputs.tf      # Emplacement du warehouse
     │   └── versions.tf
+    ├── gold/               # Stockage privé des résultats analytiques
+    │   ├── main.tf         # Blocage public, chiffrement au repos et HTTPS
+    │   ├── outputs.tf      # Nom du bucket
+    │   └── versions.tf
     ├── glue-iam/           # Rôle d’exécution et accès Bronze/Silver
-    └── glue-job/           # Job PySpark, catalogue, journaux et droits associés
+    ├── glue-job/           # Job PySpark, catalogue, journaux et droits associés
+    │   ├── main.tf
+    │   ├── permissions.tf
+    │   ├── transactions.py
+    │   ├── variables.tf
+    │   ├── outputs.tf
+    │   └── versions.tf
+    └── athena/             # Base Gold, moteur Athena et emplacement privé des résultats
         ├── main.tf
-        ├── permissions.tf
-        ├── transactions.py
         ├── variables.tf
         ├── outputs.tf
         └── versions.tf
@@ -54,6 +63,35 @@ Récupérer l’emplacement S3 à fournir à Glue depuis la racine du dépôt.
 ```bash
 terraform -chdir=infra output -raw silver_warehouse_uri
 ```
+
+## Gold dans Athena
+
+La table Iceberg `gaming_analytics_gold.player_daily_finance` contient une ligne
+par joueur et par jour UTC, d’après la date de création de la transaction.
+Elle expose les dépôts et retraits validés, le flux net et le nombre de dépôts échoués.
+Les fichiers de table sont sous `warehouse/player_daily_finance/` dans le bucket Gold.
+Le groupe de travail Athena impose des résultats chiffrés sous `athena-results/`
+et une limite de 100 Mio scannés par requête.
+
+Depuis la racine du dépôt, récupérer le bucket et le groupe de travail.
+
+```bash
+terraform -chdir=infra output -raw gold_bucket_name
+terraform -chdir=infra output -raw gold_athena_workgroup
+```
+
+Dans Athena, sélectionner ce groupe de travail et exécuter les requêtes dans l’ordre.
+
+1. [Créer la table](../sql/gold/create_player_daily_finance.sql) en remplaçant
+   `${gold_bucket}` par le nom du bucket.
+2. [Rafraîchir les agrégats](../sql/gold/refresh_player_daily_finance.sql) après les
+   mises à jour de Silver. Cette requête relit Silver et synchronise Gold en une
+   opération `MERGE`. Le rafraîchissement se lance manuellement.
+3. [Consulter les KPI](../sql/gold/select_player_daily_finance.sql).
+
+Après le lot Silver `002`, la requête renvoie deux lignes le 3 novembre 2026.
+Le flux net attendu est de 120,00 pour `P001` et de -15,00 pour `P002`, avec
+zéro dépôt échoué pour chacun. Un second rafraîchissement doit donner le même résultat.
 
 ## Rôle d’exécution Glue
 

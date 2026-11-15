@@ -6,6 +6,10 @@ module "silver" {
   source = "./modules/silver"
 }
 
+module "gold" {
+  source = "./modules/gold"
+}
+
 module "glue_iam" {
   source = "./modules/glue-iam"
 
@@ -21,4 +25,10 @@ module "glue_job" {
   warehouse_uri      = module.silver.warehouse_uri
   role_arn           = module.glue_iam.role_arn
   role_name          = module.glue_iam.role_name
+}
+
+module "athena" {
+  source = "./modules/athena"
+
+  gold_bucket_name = module.gold.bucket_name
 }
