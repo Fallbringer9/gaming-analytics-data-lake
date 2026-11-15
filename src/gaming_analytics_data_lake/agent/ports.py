@@ -1,7 +1,11 @@
 from typing import Protocol
 
 from gaming_analytics_data_lake.agent.domain.catalog import ValidatedQuery
-from gaming_analytics_data_lake.agent.domain.models import QueryResult, ToolSelection
+from gaming_analytics_data_lake.agent.domain.models import (
+    AgentResult,
+    QueryResult,
+    ToolSelection,
+)
 
 
 class ToolSelector(Protocol):
@@ -10,3 +14,7 @@ class ToolSelector(Protocol):
 
 class QueryExecutor(Protocol):
     def execute(self, query: ValidatedQuery) -> QueryResult: ...
+
+
+class QuestionAnswerer(Protocol):
+    def ask(self, question: str) -> AgentResult: ...

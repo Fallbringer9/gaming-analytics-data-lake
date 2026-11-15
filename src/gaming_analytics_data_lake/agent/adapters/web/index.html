@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Console d’analyse · Gaming Analytics</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <div class="identity">
+        <div class="mark" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div>
+          <p class="project">Gaming Analytics</p>
+          <h1>Console d’analyse</h1>
+        </div>
+      </div>
+      <span class="environment"><i aria-hidden="true"></i>Données synthétiques</span>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="panel controls">
+      <form id="question-form">
+        <label for="question">Poser une question</label>
+        <textarea id="question" name="question" rows="5" maxlength="1000" required
+          placeholder="Ex. Quel est le bilan financier du 4 au 10 novembre 2026 inclus ?"></textarea>
+        <button class="primary" id="submit" type="submit">Analyser <span aria-hidden="true">→</span></button>
+      </form>
+
+      <section class="examples" aria-labelledby="example-title">
+        <h2 id="example-title">Exemples</h2>
+        <button class="example" type="button" data-question="Liste les dépôts individuels validés strictement supérieurs à 10 000 du 4 au 10 novembre 2026 inclus.">Dépôts supérieurs à 10 000 <span aria-hidden="true">↗</span></button>
+        <button class="example" type="button" data-question="Quel est le flux net par joueur du 4 au 10 novembre 2026 inclus ?">Flux net par joueur <span aria-hidden="true">↗</span></button>
+        <button class="example" type="button" data-question="Quels joueurs ont eu des dépôts échoués du 4 au 10 novembre 2026 inclus ?">Dépôts échoués <span aria-hidden="true">↗</span></button>
+        <button class="example" type="button" data-question="Montre l’évolution jour par jour des indicateurs financiers de P001 du 4 au 10 novembre 2026 inclus.">Tendance de P001 <span aria-hidden="true">↗</span></button>
+      </section>
+    </aside>
+
+    <section class="panel results" id="results" aria-labelledby="result-title" aria-busy="false">
+      <div class="result-heading">
+        <div>
+          <h2 id="result-title">Résultats</h2>
+          <p id="period" class="period" hidden></p>
+        </div>
+        <span id="row-count" class="counter" hidden></span>
+      </div>
+
+      <div id="status" class="status" data-state="idle" role="status">
+        <span class="status-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <p id="status-text">Pose une question ou choisis un exemple pour afficher les résultats.</p>
+      </div>
+
+      <div id="data" hidden>
+        <div class="table-frame" tabindex="0" role="region" aria-label="Tableau des résultats">
+          <table aria-labelledby="result-title">
+            <thead id="table-head"></thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+        <section class="chart" id="chart" aria-labelledby="chart-title" hidden>
+          <h3 id="chart-title"></h3>
+          <ol id="chart-bars"></ol>
+          <p id="chart-note" class="period" hidden></p>
+        </section>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

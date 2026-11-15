@@ -1,53 +1,96 @@
 # Gaming Analytics Data Lake
 
-J’ai réalisé ce projet dans une démarche pédagogique pour approfondir mes connaissances en data engineering et développer ma capacité à travailler en collaboration avec un agent Codex.
+## Pourquoi ce projet
 
-Data lake AWS pour analyser des transactions de jeu synthétiques. La V1 traite des lots CSV, conserve la dernière version valide de chaque transaction et expose des indicateurs financiers par joueur et par jour dans Athena.
+Après **12 ans dans le secteur des jeux**, je souhaite me reconvertir vers les métiers de la **data, du cloud et de l’intelligence artificielle**. J’ai choisi un sujet proche de mon expérience pour relier des questions métier que je connais à de nouvelles compétences techniques.
 
-## Architecture V1
+Ce projet est pédagogique. Je l’ai conçu pour revoir mes fondamentaux SQL, pratiquer le *clean code*, mettre un premier pied dans le data engineering et apprendre à développer avec un agent de code, **Codex**. J’ai défini les cas métier, validé les choix d’architecture et confronté les résultats aux données de test à chaque étape.
+
+J’ai aussi expérimenté le *harness engineering*, qui consiste ici à donner à l’agent un cadre de travail vérifiable. Le fichier [`AGENTS.md`](AGENTS.md) fixe les règles du dépôt. Ruff et pytest apportent des retours rapides, un test vérifie les frontières de l’architecture hexagonale et un lot synthétique sert de référence pour les tests de bout en bout sur AWS. [Présentation du harness engineering par OpenAI](https://openai.com/index/harness-engineering/)
+
+## Le projet
+
+Gaming Analytics Data Lake transforme des **transactions de jeu synthétiques** en indicateurs financiers. La **V1** construit et vérifie le pipeline de données, du CSV brut jusqu’aux tables interrogeables dans Athena. La **V2** ajoute une console locale où l’on pose une question en français et où l’on consulte les résultats en tableau et en graphique.
 
 ```text
-CSV synthétiques
-    │
-    ▼
-S3 Bronze ──► AWS Glue 5.0 / PySpark ──► Silver Iceberg sur S3
-                        │                         │
-                        ▼                         ▼
-                   Quarantaine S3          Agrégats SQL dans Athena
-                                                  │
-                                                  ▼
-                                           Gold Iceberg sur S3 ──► Requêtes Athena
+CSV → S3 Bronze → Glue / PySpark → Silver Iceberg → SQL Athena → Gold Iceberg
+                          └──→ Quarantaine S3
+
+Navigateur → API Python → Bedrock propose un outil
+                 └──→ Validation → Requête Athena sur Gold → Résultats JSON
 ```
 
-| Couche | Rôle |
+| Couche | Responsabilité |
 | --- | --- |
-| Bronze | CSV bruts de référence des joueurs et lots de transactions, conservés séparément. |
-| Quarantaine | Rapports JSON Lines par lot et par exécution, avec les valeurs reçues, le fichier source et les motifs de rejet. |
-| Silver | Table Iceberg `gaming_analytics_silver.transactions`. Le `MERGE` utilise `transaction_id` et applique une mise à jour lorsque `updated_at` est plus récent. |
-| Gold | Table Iceberg `gaming_analytics_gold.player_daily_finance`, avec une ligne par joueur et par jour UTC de création de la transaction. |
-| Athena | Groupe de travail dédié, résultats chiffrés dans S3 et limite de 100 Mio scannés par requête. |
+| **Bronze** | Conserver les CSV des joueurs et des transactions, organisés par lot. |
+| **Silver** | Conserver la dernière version valide de chaque transaction dans Iceberg. Le `MERGE` s’appuie sur `transaction_id` et `updated_at`. |
+| **Quarantaine** | Conserver les lignes rejetées, leur provenance et les motifs de rejet, en JSON Lines chiffré dans S3. |
+| **Gold** | Publier les KPI financiers journaliers par joueur et une table de dépôts individuels validés. Les jours sont calculés en UTC à partir de la date de création. |
+| **Agent** | Utiliser Claude pour sélectionner l’une des huit requêtes prédéfinies. Python valide les paramètres, exécute le SQL versionné et renvoie les données calculées par Athena. |
 
-### Règles métier
+Le **flux net** correspond aux dépôts validés moins les retraits validés. Un dépôt au statut `failed` alimente le compteur d’échecs métier. Une ligne qui échoue aux contrôles de données va en quarantaine et laisse la dernière version valide en Silver.
 
-- Les dépôts et retraits au statut `completed` alimentent le flux net, calculé comme **dépôts validés − retraits validés**.
-- Les dépôts au statut `failed` alimentent le compteur d’échecs.
-- Glue contrôle l’identifiant de transaction, le joueur, le montant positif au format `DECIMAL(18, 2)`, les horodatages avec fuseau, le type et le statut. La V1 accepte les types `deposit` et `withdrawal` et les statuts `completed` et `failed`.
-- Une mise à jour rejetée laisse la dernière version valide dans Silver.
+## Démonstration
 
-## Arborescence
+La console interroge le [lot synthétique de bout en bout](data/scenarios/transactions_e2e.csv), qui contient **15 dépôts de 40,00 à 25 000,00** entre le 4 et le 10 novembre 2026. Le lot comprend **10 dépôts validés** pour un total de **132 031,57**, et **5 dépôts échoués**.
 
-| Dossier | Contenu |
+### Dépôts validés strictement supérieurs à 10 000
+
+L’agent retourne **six transactions**, de **10 000,01 à 25 000,00**. Le dépôt validé de 10 000,00 et les dépôts échoués au-dessus du seuil sont exclus. Le graphique reprend les montants du tableau.
+
+![Console avec six dépôts validés strictement supérieurs à 10 000, affichés en tableau et en barres](docs/pictures/depots-superieurs-a-10000.png)
+
+### Dépôts échoués par joueur
+
+Le classement affiche **3 dépôts échoués pour P001** et **2 pour P002**. Ces cinq lignes sont des transactions métier valides dans Silver.
+
+![Console avec trois dépôts échoués pour P001 et deux pour P002](docs/pictures/depots-echoues-par-joueur.png)
+
+### Tendance journalière de P001
+
+La console montre les trois jours où P001 a eu une activité sur la période. Le graphique reprend le flux net journalier et le tableau détaille également les dépôts, les retraits et les échecs.
+
+![Console avec les indicateurs financiers journaliers de P001 sur trois jours actifs](docs/pictures/tendance-journaliere-p001.png)
+
+Les **huit outils** ont été vérifiés avec Claude et Athena en comparant les résultats à un calcul indépendant depuis le CSV. Le parcours **navigateur → API → Claude → Athena** a également été testé avec un résultat de six lignes, un résultat vide et une question hors catalogue.
+
+## Technologies et choix d’architecture
+
+| Technologie | Usage dans le projet |
 | --- | --- |
-| [`data/`](data/) | CSV synthétiques de départ. |
-| [`infra/`](infra/README.md) | Modules Terraform pour S3, IAM, Glue et Athena. |
-| [`sql/gold/`](sql/gold/) | Création, rafraîchissement et consultation de la table Gold. |
-| [`src/`](src/) et [`tests/`](tests/) | Calcul de référence Python et tests locaux. |
+| **Amazon S3, AWS Glue 5.0 et PySpark** | Stockage des lots, validation, quarantaine et traitement des transactions. |
+| **Apache Iceberg, Glue Data Catalog et Amazon Athena** | Tables Silver et Gold, mises à jour transactionnelles et requêtes SQL. |
+| **Amazon Bedrock, Claude Haiku 4.5 et Boto3** | Sélection d’outil à partir d’une question et appels AWS côté serveur. |
+| **Terraform et IAM** | Modules d’infrastructure et permissions ciblées, dont le rôle Glue limité aux ressources utilisées. |
+| **Python 3.13, uv, pytest et Ruff** | Backend, gestion des dépendances et vérifications locales. |
+| **HTML, CSS et JavaScript vanilla** | Console sombre, formulaire, tableau et graphique, servis avec l’API locale. |
 
-## Reproduire la démonstration
+Le backend V2 suit une **architecture hexagonale**. Le domaine porte le catalogue et ses règles. Le cas d’usage `AnalyticsAgent.ask` dépend des ports `ToolSelector` et `QueryExecutor`. Bedrock et Athena implémentent ces ports, tandis que la CLI et l’API HTTP appellent le même cas d’usage. Cette séparation permet de tester les règles avec des doubles sans appeler AWS. [Code de l’agent](src/gaming_analytics_data_lake/agent/) · [Tests](tests/)
 
-### 1. Vérifier les tests locaux
+Les données et Athena restent à **Paris (`eu-west-3`)**. Le client Bedrock appelle **Stockholm (`eu-north-1`)** via le profil d’inférence européen Claude Haiku 4.5, qui peut traiter la demande dans ses régions européennes de destination. Les identifiants AWS restent côté serveur. Les buckets bloquent l’accès public, les résultats Athena sont chiffrés, et la configuration AWS locale, les plans et l’état Terraform sont exclus de Git. [Profil Claude Haiku 4.5 sur Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-haiku-4-5.html)
 
-Avec Python 3.13 et `uv`, depuis la racine du dépôt.
+## Problèmes rencontrés et corrections
+
+| Problème | Correction et vérification |
+| --- | --- |
+| **Démarrage de Glue** | Le script déclarait `JOB_RUN_ID` alors que Glue le fournit déjà. La déclaration en double a été retirée. |
+| **`MERGE` Silver et provenance des fichiers** | Spark considérait le plan source comme non déterministe. Les lignes validées sont matérialisées avant le `MERGE`. Le rejeu de `T003` conserve une seule version courante. |
+| **Écriture en quarantaine et permissions S3** | L’écriture Spark nécessitait un droit de listage supplémentaire. Le job écrit maintenant ses rapports directement dans le préfixe de quarantaine, avec chiffrement et des droits ciblés. |
+| **Qualité des données en entrée de Silver** | La revue a relevé trois défauts. Les dates `created_at` invalides pouvaient bloquer Gold, les types et statuts inconnus pouvaient fausser les KPI, et les versions contradictoires au même horodatage pouvaient être ignorées entre lots. Glue rejette désormais ces trois cas. Le [lot de régression](tests/fixtures/glue_validation_regression.csv) a produit six rejets attendus sans modifier les KPI. |
+| **Accès au modèle Claude** | Haiku 5.5 a été refusé pour le compte de test malgré une simulation IAM favorable. Haiku 4.5 a été validé par des appels réels. Les régions d’Athena et de Bedrock sont configurées séparément. |
+| **Connexions du navigateur** | Le serveur local traitait une seule connexion à la fois. Le passage à un serveur capable de traiter plusieurs connexions permet de servir la page, les fichiers statiques et l’API en parallèle. |
+
+## Améliorations possibles
+
+- **Ajouter un buffer entre le dépôt S3 et Glue.** Les notifications du préfixe de transactions Bronze alimenteraient une file SQS. Un orchestrateur pourrait regrouper les arrivées selon un nombre de fichiers ou un délai, limiter les exécutions simultanées et lancer Glue sur les lots prêts. Les CSV resteraient dans S3 et la file transporterait leurs références. Comme les notifications peuvent être livrées plusieurs fois et arriver dans le désordre, le consommateur devrait suivre les lots déjà traités et gérer les relances. Une file d’échecs isolerait les notifications impossibles à traiter, tandis que la quarantaine continuerait à isoler les lignes invalides. [Notifications d’événements S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/notification-how-to-event-types-and-destinations.html)
+- **Rafraîchir Gold après Silver et limiter le recalcul.** Aujourd’hui, les deux tables Gold sont rafraîchies manuellement à partir de Silver. L’orchestration pourrait déclencher le calcul après un lot réussi et recalculer les joueurs et les jours réellement affectés, y compris l’ancienne date si une correction déplace une transaction.
+- **Rendre les tests de bout en bout relançables avec une seule commande.** Le lot et les résultats attendus sont connus. Un test AWS à déclenchement explicite pourrait enchaîner le chargement, Glue, le rafraîchissement Gold et la comparaison des huit réponses de l’agent.
+
+## Reproduire le projet
+
+### Vérifier les tests locaux
+
+Depuis la racine du dépôt, avec Python 3.13 et `uv` installés.
 
 ```bash
 uv sync --locked
@@ -56,161 +99,26 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-Glue fournit PySpark et `awsglue` lors de l’exécution du job sur AWS.
+### Préparer les données sur AWS
 
-### 2. Déployer l’infrastructure
+1. Suivre le [guide Terraform](infra/README.md) avec un profil AWS autorisé. Pour reprendre un déploiement existant, utiliser son état local Terraform.
+2. Charger [les joueurs](data/players.csv) sous `bronze/players/batch_id=001/players.csv` et [les transactions initiales](data/transactions.csv) sous `bronze/transactions/batch_id=001/transactions.csv`.
+3. Lancer Glue avec `--batch_id=001` et `--players_batch=001`. Attendre l’état `SUCCEEDED`. La table Silver contient six transactions sur un déploiement neuf.
+4. Pour la démo V2, charger le [lot E2E](data/scenarios/transactions_e2e.csv) sous `bronze/transactions/batch_id=test-agent-e2e-015/transactions.csv`, puis lancer Glue avec ce lot et le référentiel joueurs `001`.
+5. Dans le groupe de travail Athena affiché par `terraform -chdir=infra output -raw gold_athena_workgroup`, créer les deux tables Gold avec [les KPI journaliers](sql/gold/create_player_daily_finance.sql) et [les dépôts validés](sql/gold/create_completed_deposits.sql). Dans les scripts de création, remplacer `${gold_bucket}` par la sortie de `terraform -chdir=infra output -raw gold_bucket_name`. Exécuter ensuite [le rafraîchissement des KPI](sql/gold/refresh_player_daily_finance.sql) et [celui des dépôts](sql/gold/refresh_completed_deposits.sql) après chaque mise à jour de Silver.
 
-Préparer la CLI AWS, Terraform et un profil AWS autorisé à gérer les ressources du projet. Pour un nouvel environnement, exécuter les commandes ci-dessous et examiner le plan avant de l’appliquer. Pour reprendre un déploiement existant, utiliser son état Terraform. Le [guide d’infrastructure](infra/README.md) décrit la configuration locale et les modules.
+Pour tester l’incrémental et la quarantaine, partir du lot initial et créer deux CSV à une ligne avec l’en-tête de `data/transactions.csv`. Charger chaque fichier sous `bronze/transactions/batch_id=<lot>/`, puis lancer Glue avec l’identifiant correspondant.
 
-```bash
-export AWS_PROFILE=mon-profil-aws
-export AWS_REGION=eu-west-3
+| Lot | Ligne CSV | Résultat pour P001 après rafraîchissement de Gold |
+| --- | --- | --- |
+| `test-quarantine-001` | `T003,P001,deposit,abc,completed,2026-11-03T11:00:00Z,2026-11-03T12:00:00Z` | Un rejet `invalid_amount`. Flux net de 70,00 et un dépôt échoué. |
+| `002` | `T003,P001,deposit,50.00,completed,2026-11-03T11:00:00Z,2026-11-03T13:00:00Z` | Mise à jour valide. Flux net de 120,00 et zéro dépôt échoué. Rejouer le lot conserve les six transactions du 3 novembre dans Silver. |
 
-terraform -chdir=infra init
-terraform -chdir=infra fmt -check -recursive
-terraform -chdir=infra validate
-terraform -chdir=infra plan
-terraform -chdir=infra apply
-```
+Les rapports Glue sont sous `quarantine/transactions/glue/batch_id=<lot>/run_id=<exécution>/` dans le bucket Bronze.
 
-### 3. Charger Bronze et exécuter Glue
+### Lancer la console
 
-Ces commandes chargent le lot initial dans un nouveau bucket Bronze. Sur un bucket déjà alimenté, conserver les fichiers chargés en utilisant un nouvel identifiant pour chaque nouveau lot.
-
-```bash
-bronze_bucket="$(terraform -chdir=infra output -raw bronze_bucket_name)"
-glue_job="$(terraform -chdir=infra output -raw glue_job_name)"
-
-aws s3api put-object --bucket "$bronze_bucket" --body data/players.csv \
-  --key bronze/players/batch_id=001/players.csv --if-none-match '*' \
-  --server-side-encryption AES256 --profile "$AWS_PROFILE" --region "$AWS_REGION"
-aws s3api put-object --bucket "$bronze_bucket" --body data/transactions.csv \
-  --key bronze/transactions/batch_id=001/transactions.csv --if-none-match '*' \
-  --server-side-encryption AES256 --profile "$AWS_PROFILE" --region "$AWS_REGION"
-
-run_id="$(aws glue start-job-run --job-name "$glue_job" \
-  --arguments '{"--batch_id":"001","--players_batch":"001"}' \
-  --profile "$AWS_PROFILE" --region "$AWS_REGION" --query JobRunId --output text)"
-
-aws glue get-job-run --job-name "$glue_job" --run-id "$run_id" \
-  --profile "$AWS_PROFILE" --region "$AWS_REGION" --query JobRun.JobRunState --output text
-```
-
-Relancer la dernière commande jusqu’à ce que le job indique `SUCCEEDED`. En cas d’échec, consulter le détail de l’exécution dans Glue avant de continuer. La table Silver contient alors six transactions sur un déploiement neuf. Les éventuels rejets se trouvent dans `quarantine/transactions/glue/batch_id=<lot>/run_id=<exécution>/` sur Bronze.
-
-### 4. Rafraîchir et consulter Gold
-
-Dans l’éditeur Athena, choisir le groupe de travail renvoyé par `terraform -chdir=infra output -raw gold_athena_workgroup`.
-
-1. Exécuter [la création de table](sql/gold/create_player_daily_finance.sql), en remplaçant `${gold_bucket}` par la sortie de `terraform -chdir=infra output -raw gold_bucket_name`.
-2. Exécuter [le rafraîchissement Gold](sql/gold/refresh_player_daily_finance.sql).
-3. Exécuter [la requête de consultation](sql/gold/select_player_daily_finance.sql).
-
-### 5. Vérifier l’incrémental et la quarantaine
-
-Pour rejouer la démonstration, créer deux CSV d’une seule transaction avec l’en-tête suivant.
-
-```csv
-transaction_id,player_id,transaction_type,amount,status,created_at,updated_at
-```
-
-| Lot de transactions | Ligne à placer dans le CSV |
-| --- | --- |
-| `test-quarantine-001` | `T003,P001,deposit,abc,completed,2026-11-03T11:00:00Z,2026-11-03T12:00:00Z` |
-| `002` | `T003,P001,deposit,50.00,completed,2026-11-03T11:00:00Z,2026-11-03T13:00:00Z` |
-
-Déposer chaque fichier sous `bronze/transactions/batch_id=<lot>/`, puis lancer Glue avec le `--batch_id` correspondant. Attendre la fin de chaque exécution avant la suivante. Exécuter d’abord le lot invalide, puis le lot valide, puis rejouer le lot valide. Rafraîchir Gold après chaque contrôle.
-
-| Contrôle | Flux net P001 | Dépôts échoués P001 | Vérification |
-| --- | ---: | ---: | --- |
-| Lot initial `001` | 70,00 | 1 | Six transactions Silver. |
-| Lot invalide | 70,00 | 1 | Un rejet `invalid_amount`, même snapshot Silver. |
-| Lot valide `002` | 120,00 | 0 | Mise à jour de `T003`, six transactions Silver. |
-| Rejeu de `002` | 120,00 | 0 | Six transactions uniques et mêmes lignes Gold. |
-
-Le flux net de `P002` reste à −15,00. La table Gold contient deux lignes pour le 3 novembre 2026.
-
-## Corrections issues de la revue V1
-
-| Problème observé | Correction |
-| --- | --- |
-| Une date `created_at` mal formée pouvait entrer dans Silver et faire échouer Gold. | Glue place en quarantaine les dates de création absentes ou invalides avec `invalid_created_at`. |
-| Un type ou un statut inconnu pouvait passer dans Silver et fausser les KPI. | Les valeurs hors du contrat V1 sont rejetées avec `invalid_transaction_type` ou `invalid_status`. |
-| Deux versions différentes pouvaient partager le même identifiant et le même horodatage, notamment entre deux lots. | Glue compare les valeurs métier typées. Les versions contradictoires sont isolées avec `conflicting_transaction_version`. Une répétition équivalente correspond à un rejeu. |
-
-Le [lot synthétique de régression](tests/fixtures/glue_validation_regression.csv)
-peut être chargé sous `bronze/transactions/batch_id=test-validation-v1/` après le
-lot `002`. Il doit produire six rejets et conserver les six transactions Silver
-ainsi que les KPI Gold de la démonstration.
-
-## Sécurité et périmètre
-
-- Les buckets bloquent l’accès public. Silver et Gold imposent HTTPS et configurent explicitement le chiffrement SSE-S3. Le rôle Glue limite ses accès aux préfixes nécessaires et à la table Silver.
-- Les identifiants restent dans le profil AWS local. La configuration locale du fournisseur, les états Terraform et les plans sont ignorés par Git.
-- Le chargement et le rafraîchissement se lancent manuellement. Gold relit Silver à chaque rafraîchissement. Les tests de référence utilisent de petits lots synthétiques.
-- La V2 prévoit un agent Bedrock qui sélectionne des requêtes Athena prédéfinies et paramétrées. Le backend contrôle leur exécution. Une interface JavaScript légère affichera les résultats en tableau et en graphique.
-
-## Catalogue SQL V2
-
-Les requêtes sont des `SELECT` versionnés sur la table Gold. Les valeurs se
-transmettent dans l’ordre des `?` avec les paramètres d’exécution Athena.
-Les dates sont en UTC, au format `AAAA-MM-JJ`. Le début est inclus et la fin exclue.
-
-| Requête | Paramètres dans l’ordre |
-| --- | --- |
-| [`get_player_finance`](sql/agent/get_player_finance.sql) | Joueur, début, fin |
-| [`get_net_flow_by_player`](sql/agent/get_net_flow_by_player.sql) | Début, fin |
-| [`get_finance_overview`](sql/agent/get_finance_overview.sql) | Début, fin |
-| [`get_daily_finance_trend`](sql/agent/get_daily_finance_trend.sql) | Début, fin, joueur facultatif (transmettre `NULL` dans Athena pour tous les joueurs) |
-| [`get_failed_deposits`](sql/agent/get_failed_deposits.sql) | Début, fin |
-| [`get_top_depositors`](sql/agent/get_top_depositors.sql) | Début, fin, nombre de joueurs (1 à 100) |
-| [`get_max_deposit`](sql/agent/get_max_deposit.sql) | Début, fin |
-| [`get_large_deposits`](sql/agent/get_large_deposits.sql) | Début, fin |
-
-Pour vérifier le 3 novembre 2026, utiliser le groupe de travail
-`gaming-analytics-gold` et les dates `'2026-11-03'` et `'2026-11-04'`.
-La première requête, avec `'P001'` en premier paramètre, renvoie un flux net de
-120,00. La seconde renvoie 120,00 pour `P001` et −15,00 pour `P002`.
-
-Le cas d’usage valide les dates et l’identifiant du joueur. L’adaptateur Athena
-charge les fichiers SQL depuis un dossier configuré côté serveur et appelle Athena
-avec les valeurs validées. Les décimaux sont conservés sous forme de texte
-dans les résultats pour garder leur précision.
-
-### Architecture de l’agent
-
-`agent/domain/` porte le catalogue, ses règles de validation et ses modèles.
-Le cas d’usage `AnalyticsAgent.ask` dépend des ports `ToolSelector` et
-`QueryExecutor`. Les adaptateurs Bedrock et Athena implémentent ces ports.
-Le point d’entrée assemble les adaptateurs avec leurs clients AWS respectifs.
-
-### Dépôts individuels Gold
-
-Les deux outils de dépôts individuels interrogent
-`gaming_analytics_gold.completed_deposits`, qui contient uniquement les dépôts
-validés. Dans le groupe de travail Gold, exécuter
-[la création de table](sql/gold/create_completed_deposits.sql) en remplaçant
-`${gold_bucket}` par le nom du bucket, puis
-[le rafraîchissement](sql/gold/refresh_completed_deposits.sql) après chaque mise
-à jour de Silver. Rafraîchir aussi la table des KPI journaliers.
-
-`get_large_deposits` renvoie les 100 montants les plus élevés parmi les dépôts
-validés strictement supérieurs à **10 000** sur la période. Un montant exactement
-égal à 10 000 est exclu. Cette requête n'accepte pas de seuil fourni par le modèle.
-
-### Régions AWS de la V2
-
-- `ATHENA_REGION` correspond à la région des données et du groupe de travail,
-  `eu-west-3` pour le déploiement actuel.
-- `BEDROCK_REGION` sera configurée indépendamment lors du raccordement de
-  Bedrock. Vérifier la disponibilité du modèle ou du profil d’inférence, les
-  permissions IAM et les restrictions de région applicables avant le premier
-  appel. Pour un profil interrégional, vérifier aussi ses régions de destination.
-
-### Tester l’agent Claude
-
-Depuis la racine du dépôt, avec un profil AWS autorisé à interroger Gold
-et à invoquer le profil d’inférence européen de Claude Haiku 4.5.
+Depuis la racine du dépôt, configurer un profil qui a accès à Athena, au catalogue et au stockage Gold et à l’emplacement des résultats. Bedrock requiert `bedrock:InvokeModel` sur le profil d’inférence source et les modèles de destination. [Permissions des profils d’inférence Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html)
 
 ```bash
 export AWS_PROFILE=mon-profil-aws
@@ -218,39 +126,23 @@ export ATHENA_REGION=eu-west-3
 export BEDROCK_REGION=eu-north-1
 export BEDROCK_MODEL_ID=eu.anthropic.claude-haiku-4-5-20251001-v1:0
 
-uv run --extra agent python -m gaming_analytics_data_lake.agent \
-  "Quel est le flux net par joueur le 3 novembre 2026 ?"
+uv run --extra agent python -m gaming_analytics_data_lake.agent.api
 ```
 
-Bedrock reçoit la question et les descriptions des outils disponibles. Python
-valide l’outil et ses paramètres avant de lancer le SQL. La commande renvoie
-en JSON le nom de la requête, les paramètres et les lignes Athena.
+Ouvrir [la console locale](http://127.0.0.1:8000/), choisir **Dépôts supérieurs à 10 000**, puis cliquer sur **Analyser**. La page et l’API partagent la même adresse locale, sans Cognito ni configuration CORS.
 
-Stockholm est la région d’appel du profil européen. L’inférence peut être
-traitée dans l’une de ses régions de destination. Athena et les tables Gold
-restent à Paris.
+Pour interroger l’API directement depuis un autre terminal.
 
-- Pour `Converse`, accorder `bedrock:InvokeModel` sur l’ARN du profil source
-  et sur les ARN des modèles de toutes ses destinations. Vérifier aussi les
-  restrictions régionales de l’organisation si elles s’appliquent.
-- Vérifier séparément l’accès Anthropic au niveau du compte. Le profil Haiku 5.5
-  était actif et autorisé dans la simulation IAM, mais son invocation a été
-  refusée pour le compte de test. Haiku 4.5 a réussi les deux parcours.
-- Le profil utilisé localement doit aussi avoir accès au groupe de travail
-  Athena, au catalogue Gold et au préfixe S3 de résultats.
+```bash
+curl --json '{"question":"Liste les dépôts validés strictement supérieurs à 10 000 du 4 au 10 novembre 2026 inclus."}' \
+  http://127.0.0.1:8000/api/ask
+```
 
-Références AWS concernant [Converse](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html),
-[les profils d’inférence géographiques](https://docs.aws.amazon.com/bedrock/latest/userguide/geographic-cross-region-inference.html)
-et [l’accès aux modèles](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html).
+Le JSON contient le nom de la requête, ses paramètres, les colonnes et les lignes. Les montants sont transmis sous forme de chaînes pour conserver leur précision. Dans les paramètres, le début est inclus et la fin est exclue. Un résultat vide reste un succès HTTP 200. Une question hors catalogue ou insuffisamment précise renvoie HTTP 422.
 
-### Scénario de bout en bout V2
+### Arborescence
 
-Le [lot synthétique E2E](data/scenarios/transactions_e2e.csv) contient 15 dépôts
-de 40 à 25 000, datés du 4 au 10 novembre 2026. Il inclut des dépôts validés de
-9 999,99, 10 000 et 10 000,01 ainsi qu’un dépôt échoué au-dessus de 10 000.
-
-Pour reproduire le scénario, charger ce CSV sous
-`bronze/transactions/batch_id=test-agent-e2e-015/`, lancer Glue avec ce lot et
-le référentiel joueurs `001`, puis rafraîchir les deux tables Gold. Dans l’agent,
-interroger la période du 4 au 10 novembre 2026 inclus. L’outil des gros dépôts
-doit retourner 10 000,01 et les autres dépôts validés au-dessus du seuil.
+- [`data/`](data/) — données synthétiques de départ et lot de démo.
+- [`infra/`](infra/README.md) — modules Terraform et job Glue.
+- [`sql/gold/`](sql/gold/) et [`sql/agent/`](sql/agent/) — scripts Gold et catalogue des huit requêtes.
+- [`src/`](src/) et [`tests/`](tests/) — code Python, front, tests locaux et données de régression.
