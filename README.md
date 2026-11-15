@@ -149,3 +149,69 @@ ainsi que les KPI Gold de la démonstration.
 - Les identifiants restent dans le profil AWS local. La configuration locale du fournisseur, les états Terraform et les plans sont ignorés par Git.
 - Le chargement et le rafraîchissement se lancent manuellement. Gold relit Silver à chaque rafraîchissement. Les tests de référence utilisent de petits lots synthétiques.
 - La V2 prévoit un agent Bedrock qui sélectionne des requêtes Athena prédéfinies et paramétrées. Le backend contrôle leur exécution. Une interface JavaScript légère affichera les résultats en tableau et en graphique.
+
+## Catalogue SQL V2
+
+Les requêtes sont des `SELECT` versionnés sur la table Gold. Les valeurs se
+transmettent dans l’ordre des `?` avec les paramètres d’exécution Athena.
+Les dates sont en UTC, au format `AAAA-MM-JJ`. Le début est inclus et la fin exclue.
+
+| Requête | Paramètres dans l’ordre |
+| --- | --- |
+| [`get_player_finance`](sql/agent/get_player_finance.sql) | Joueur, début, fin |
+| [`get_net_flow_by_player`](sql/agent/get_net_flow_by_player.sql) | Début, fin |
+
+Pour vérifier le 3 novembre 2026, utiliser le groupe de travail
+`gaming-analytics-gold` et les dates `'2026-11-03'` et `'2026-11-04'`.
+La première requête, avec `'P001'` en premier paramètre, renvoie un flux net de
+120,00. La seconde renvoie 120,00 pour `P001` et −15,00 pour `P002`.
+
+L’exécuteur Python charge ces deux fichiers depuis un dossier configuré côté
+serveur, valide les dates et l’identifiant du joueur, puis appelle Athena via
+un client fourni par le backend. Les décimaux sont conservés sous forme de texte
+dans les résultats pour garder leur précision.
+
+### Régions AWS de la V2
+
+- `ATHENA_REGION` correspond à la région des données et du groupe de travail,
+  `eu-west-3` pour le déploiement actuel.
+- `BEDROCK_REGION` sera configurée indépendamment lors du raccordement de
+  Bedrock. Vérifier la disponibilité du modèle ou du profil d’inférence, les
+  permissions IAM et les restrictions de région applicables avant le premier
+  appel. Pour un profil interrégional, vérifier aussi ses régions de destination.
+
+### Tester l’agent Claude
+
+Depuis la racine du dépôt, avec un profil AWS autorisé à interroger Gold
+et à invoquer le profil d’inférence européen de Claude Haiku 4.5.
+
+```bash
+export AWS_PROFILE=mon-profil-aws
+export ATHENA_REGION=eu-west-3
+export BEDROCK_REGION=eu-north-1
+export BEDROCK_MODEL_ID=eu.anthropic.claude-haiku-4-5-20251001-v1:0
+
+uv run --extra agent python -m gaming_analytics_data_lake.agent \
+  "Quel est le flux net par joueur le 3 novembre 2026 ?"
+```
+
+Bedrock reçoit la question et les descriptions des outils disponibles. Python
+valide l’outil et ses paramètres avant de lancer le SQL. La commande renvoie
+en JSON le nom de la requête, les paramètres et les lignes Athena.
+
+Stockholm est la région d’appel du profil européen. L’inférence peut être
+traitée dans l’une de ses régions de destination. Athena et les tables Gold
+restent à Paris.
+
+- Pour `Converse`, accorder `bedrock:InvokeModel` sur l’ARN du profil source
+  et sur les ARN des modèles de toutes ses destinations. Vérifier aussi les
+  restrictions régionales de l’organisation si elles s’appliquent.
+- Vérifier séparément l’accès Anthropic au niveau du compte. Le profil Haiku 5.5
+  était actif et autorisé dans la simulation IAM, mais son invocation a été
+  refusée pour le compte de test. Haiku 4.5 a réussi les deux parcours.
+- Le profil utilisé localement doit aussi avoir accès au groupe de travail
+  Athena, au catalogue Gold et au préfixe S3 de résultats.
+
+Références AWS concernant [Converse](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html),
+[les profils d’inférence géographiques](https://docs.aws.amazon.com/bedrock/latest/userguide/geographic-cross-region-inference.html)
+et [l’accès aux modèles](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html).
