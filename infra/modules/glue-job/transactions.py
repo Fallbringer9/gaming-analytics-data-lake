@@ -19,6 +19,18 @@ TRANSACTION_FIELDS = (
     "updated_at",
 )
 
+ISO_TIMESTAMP = (
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
+)
+VERSION_KEYS = ["transaction_id", "parsed_updated_at"]
+
+
+def version_payload():
+    return F.struct(
+        "player_id", "transaction_type", "parsed_amount", "status", "parsed_created_at"
+    )
+
+
 args = getResolvedOptions(
     sys.argv, ["bronze_bucket", "database", "players_batch", "batch_id"]
 )
@@ -30,6 +42,7 @@ spark = SparkSession.builder.getOrCreate()
 spark.conf.set("spark.sql.session.timeZone", "UTC")
 bronze = f"s3://{args['bronze_bucket']}"
 batch = args["batch_id"]
+table = f"glue_catalog.{args['database']}.transactions"
 players = (
     spark.read.option("header", True)
     .csv(f"{bronze}/bronze/players/batch_id={args['players_batch']}/")
@@ -56,6 +69,7 @@ for field in TRANSACTION_FIELDS:
 checked = (
     raw.join(players, "player_id", "left")
     .withColumn("parsed_amount", F.expr("try_cast(trim(amount) AS DECIMAL(18, 2))"))
+    .withColumn("parsed_created_at", F.try_to_timestamp("created_at"))
     .withColumn("parsed_updated_at", F.try_to_timestamp("updated_at"))
     .withColumn(
         "reasons",
@@ -80,12 +94,72 @@ checked = (
                     "invalid_amount",
                 ),
                 F.when(
+                    F.col("parsed_created_at").isNull()
+                    | ~F.col("created_at").rlike(ISO_TIMESTAMP),
+                    "invalid_created_at",
+                ),
+                F.when(
+                    ~F.coalesce(
+                        F.col("transaction_type").isin("deposit", "withdrawal"),
+                        F.lit(False),
+                    ),
+                    "invalid_transaction_type",
+                ),
+                F.when(
+                    ~F.coalesce(
+                        F.col("status").isin("completed", "failed"), F.lit(False)
+                    ),
+                    "invalid_status",
+                ),
+                F.when(
                     F.col("parsed_updated_at").isNull()
                     | ~F.col("updated_at").rlike(r"(?:Z|[+-]\d{2}:\d{2})$"),
                     "invalid_updated_at",
                 ),
             )
         ),
+    )
+    .cache()
+)
+versions = checked.where(F.size("reasons") == 0).select(
+    *VERSION_KEYS, version_payload().alias("incoming_payload")
+)
+conflicts = (
+    versions.groupBy(*VERSION_KEYS)
+    .agg(F.count_distinct("incoming_payload").alias("payload_count"))
+    .where(F.col("payload_count") > 1)
+    .select(*VERSION_KEYS)
+)
+if spark.catalog.tableExists(table):
+    existing = spark.table(table).select(
+        "transaction_id",
+        F.col("updated_at").alias("parsed_updated_at"),
+        "player_id",
+        "transaction_type",
+        F.col("amount").alias("parsed_amount"),
+        "status",
+        F.try_to_timestamp("created_at").alias("parsed_created_at"),
+    )
+    existing = existing.select(*VERSION_KEYS, version_payload().alias("silver_payload"))
+    silver_conflicts = (
+        versions.join(existing, VERSION_KEYS)
+        .where(~F.col("incoming_payload").eqNullSafe(F.col("silver_payload")))
+        .select(*VERSION_KEYS)
+    )
+    conflicts = conflicts.union(silver_conflicts)
+
+checked = (
+    checked.join(
+        conflicts.distinct().withColumn("version_conflict", F.lit(True)),
+        VERSION_KEYS,
+        "left",
+    )
+    .withColumn(
+        "reasons",
+        F.when(
+            (F.size("reasons") == 0) & F.col("version_conflict"),
+            F.array(F.lit("conflicting_transaction_version")),
+        ).otherwise(F.col("reasons")),
     )
     .cache()
 )
@@ -135,15 +209,13 @@ valid = (
     )
     .distinct()
 )
-if valid.groupBy("transaction_id", "updated_at").count().where("count > 1").take(1):
-    raise ValueError("Conflicting transaction versions share an updated_at timestamp")
-
-window = Window.partitionBy("transaction_id").orderBy(F.desc("updated_at"))
+window = Window.partitionBy("transaction_id").orderBy(
+    F.desc("updated_at"), F.asc("created_at")
+)
 latest = valid.withColumn("version_rank", F.row_number().over(window))
 latest = latest.where("version_rank = 1").drop("version_rank")
 valid_count = latest.count()
 if valid_count:
-    table = f"glue_catalog.{args['database']}.transactions"
     spark.sql(
         f"""
         CREATE TABLE IF NOT EXISTS {table} (

@@ -31,7 +31,7 @@ S3 Bronze ──► AWS Glue 5.0 / PySpark ──► Silver Iceberg sur S3
 
 - Les dépôts et retraits au statut `completed` alimentent le flux net, calculé comme **dépôts validés − retraits validés**.
 - Les dépôts au statut `failed` alimentent le compteur d’échecs.
-- Glue contrôle l’identifiant de transaction, la présence du joueur dans le référentiel, le montant positif au format `DECIMAL(18, 2)` et l’horodatage de mise à jour avec fuseau.
+- Glue contrôle l’identifiant de transaction, le joueur, le montant positif au format `DECIMAL(18, 2)`, les horodatages avec fuseau, le type et le statut. La V1 accepte les types `deposit` et `withdrawal` et les statuts `completed` et `failed`.
 - Une mise à jour rejetée laisse la dernière version valide dans Silver.
 
 ## Arborescence
@@ -129,6 +129,19 @@ Déposer chaque fichier sous `bronze/transactions/batch_id=<lot>/`, puis lancer 
 | Rejeu de `002` | 120,00 | 0 | Six transactions uniques et mêmes lignes Gold. |
 
 Le flux net de `P002` reste à −15,00. La table Gold contient deux lignes pour le 3 novembre 2026.
+
+## Corrections issues de la revue V1
+
+| Problème observé | Correction |
+| --- | --- |
+| Une date `created_at` mal formée pouvait entrer dans Silver et faire échouer Gold. | Glue place en quarantaine les dates de création absentes ou invalides avec `invalid_created_at`. |
+| Un type ou un statut inconnu pouvait passer dans Silver et fausser les KPI. | Les valeurs hors du contrat V1 sont rejetées avec `invalid_transaction_type` ou `invalid_status`. |
+| Deux versions différentes pouvaient partager le même identifiant et le même horodatage, notamment entre deux lots. | Glue compare les valeurs métier typées. Les versions contradictoires sont isolées avec `conflicting_transaction_version`. Une répétition équivalente correspond à un rejeu. |
+
+Le [lot synthétique de régression](tests/fixtures/glue_validation_regression.csv)
+peut être chargé sous `bronze/transactions/batch_id=test-validation-v1/` après le
+lot `002`. Il doit produire six rejets et conserver les six transactions Silver
+ainsi que les KPI Gold de la démonstration.
 
 ## Sécurité et périmètre
 
