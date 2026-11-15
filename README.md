@@ -160,16 +160,43 @@ Les dates sont en UTC, au format `AAAA-MM-JJ`. Le début est inclus et la fin ex
 | --- | --- |
 | [`get_player_finance`](sql/agent/get_player_finance.sql) | Joueur, début, fin |
 | [`get_net_flow_by_player`](sql/agent/get_net_flow_by_player.sql) | Début, fin |
+| [`get_finance_overview`](sql/agent/get_finance_overview.sql) | Début, fin |
+| [`get_daily_finance_trend`](sql/agent/get_daily_finance_trend.sql) | Début, fin, joueur facultatif (transmettre `NULL` dans Athena pour tous les joueurs) |
+| [`get_failed_deposits`](sql/agent/get_failed_deposits.sql) | Début, fin |
+| [`get_top_depositors`](sql/agent/get_top_depositors.sql) | Début, fin, nombre de joueurs (1 à 100) |
+| [`get_max_deposit`](sql/agent/get_max_deposit.sql) | Début, fin |
+| [`get_large_deposits`](sql/agent/get_large_deposits.sql) | Début, fin |
 
 Pour vérifier le 3 novembre 2026, utiliser le groupe de travail
 `gaming-analytics-gold` et les dates `'2026-11-03'` et `'2026-11-04'`.
 La première requête, avec `'P001'` en premier paramètre, renvoie un flux net de
 120,00. La seconde renvoie 120,00 pour `P001` et −15,00 pour `P002`.
 
-L’exécuteur Python charge ces deux fichiers depuis un dossier configuré côté
-serveur, valide les dates et l’identifiant du joueur, puis appelle Athena via
-un client fourni par le backend. Les décimaux sont conservés sous forme de texte
+Le cas d’usage valide les dates et l’identifiant du joueur. L’adaptateur Athena
+charge les fichiers SQL depuis un dossier configuré côté serveur et appelle Athena
+avec les valeurs validées. Les décimaux sont conservés sous forme de texte
 dans les résultats pour garder leur précision.
+
+### Architecture de l’agent
+
+`agent/domain/` porte le catalogue, ses règles de validation et ses modèles.
+Le cas d’usage `AnalyticsAgent.ask` dépend des ports `ToolSelector` et
+`QueryExecutor`. Les adaptateurs Bedrock et Athena implémentent ces ports.
+Le point d’entrée assemble les adaptateurs avec leurs clients AWS respectifs.
+
+### Dépôts individuels Gold
+
+Les deux outils de dépôts individuels interrogent
+`gaming_analytics_gold.completed_deposits`, qui contient uniquement les dépôts
+validés. Dans le groupe de travail Gold, exécuter
+[la création de table](sql/gold/create_completed_deposits.sql) en remplaçant
+`${gold_bucket}` par le nom du bucket, puis
+[le rafraîchissement](sql/gold/refresh_completed_deposits.sql) après chaque mise
+à jour de Silver. Rafraîchir aussi la table des KPI journaliers.
+
+`get_large_deposits` renvoie les 100 montants les plus élevés parmi les dépôts
+validés strictement supérieurs à **10 000** sur la période. Un montant exactement
+égal à 10 000 est exclu. Cette requête n'accepte pas de seuil fourni par le modèle.
 
 ### Régions AWS de la V2
 
@@ -215,3 +242,15 @@ restent à Paris.
 Références AWS concernant [Converse](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html),
 [les profils d’inférence géographiques](https://docs.aws.amazon.com/bedrock/latest/userguide/geographic-cross-region-inference.html)
 et [l’accès aux modèles](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html).
+
+### Scénario de bout en bout V2
+
+Le [lot synthétique E2E](data/scenarios/transactions_e2e.csv) contient 15 dépôts
+de 40 à 25 000, datés du 4 au 10 novembre 2026. Il inclut des dépôts validés de
+9 999,99, 10 000 et 10 000,01 ainsi qu’un dépôt échoué au-dessus de 10 000.
+
+Pour reproduire le scénario, charger ce CSV sous
+`bronze/transactions/batch_id=test-agent-e2e-015/`, lancer Glue avec ce lot et
+le référentiel joueurs `001`, puis rafraîchir les deux tables Gold. Dans l’agent,
+interroger la période du 4 au 10 novembre 2026 inclus. L’outil des gros dépôts
+doit retourner 10 000,01 et les autres dépôts validés au-dessus du seuil.

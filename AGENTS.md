@@ -6,6 +6,13 @@
 - Avancer une étape à la fois. Expliquer les commandes et faire valider les choix de conception avant de les appliquer.
 - Attendre la validation de l’utilisateur avant de commencer Terraform ou AWS Glue.
 
+## Architecture hexagonale et SOLID
+
+- Maintenir l’architecture hexagonale du code applicatif et l’appliquer à tout nouveau cas d’usage. Le domaine porte les règles métier et les données échangées. L’application orchestre le traitement et dépend de ports explicites, définis par des interfaces étroites.
+- Garder les dépendances orientées vers le cœur. Le domaine dépend uniquement de la bibliothèque standard et de ses propres modules. L’application et les ports peuvent importer le domaine. Réserver les SDK, SQL d’exécution, accès réseau, variables d’environnement et protocoles d’interface aux adaptateurs et au point de composition.
+- Injecter les adaptateurs dans les cas d’usage depuis le point d’entrée. Athena et Bedrock implémentent des ports distincts. La CLI et la future API appellent les cas d’usage publics. Garder les adaptateurs indépendants les uns des autres.
+- Tester les règles et les cas d’usage avec des doubles de ports sans AWS. Tester séparément les adaptateurs et vérifier que le cœur n’importe aucun adaptateur ni SDK.
+
 ## Données et règles métier
 
 - Utiliser des données synthétiques. Relier `players` et `transactions` par `player_id`.

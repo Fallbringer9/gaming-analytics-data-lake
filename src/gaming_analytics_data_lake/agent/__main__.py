@@ -6,9 +6,10 @@ from pathlib import Path
 
 import boto3
 
-from gaming_analytics_data_lake.agent.athena import AthenaQueryExecutor
-from gaming_analytics_data_lake.agent.bedrock import (
-    BedrockAnalyticsAgent,
+from gaming_analytics_data_lake.agent.adapters.athena import AthenaQueryExecutor
+from gaming_analytics_data_lake.agent.adapters.bedrock import BedrockToolSelector
+from gaming_analytics_data_lake.agent.application import (
+    AnalyticsAgent,
     ToolSelectionError,
 )
 
@@ -30,11 +31,10 @@ def main() -> None:
         os.getenv("ATHENA_WORKGROUP", "gaming-analytics-gold"),
         Path("sql/agent"),
     )
-    agent = BedrockAnalyticsAgent(
-        session.client("bedrock-runtime", region_name=bedrock_region),
-        model_id,
-        executor,
+    selector = BedrockToolSelector(
+        session.client("bedrock-runtime", region_name=bedrock_region), model_id
     )
+    agent = AnalyticsAgent(selector, executor)
     try:
         result = agent.ask(args.question)
     except ToolSelectionError as error:

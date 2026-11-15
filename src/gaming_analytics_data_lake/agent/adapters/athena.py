@@ -1,57 +1,27 @@
-import re
-from collections.abc import Mapping
-from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
 
-QUERY_PARAMETERS = {
-    "get_player_finance": ("player_id", "start_date", "end_date"),
-    "get_net_flow_by_player": ("start_date", "end_date"),
-}
-
-ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
-PLAYER_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+from gaming_analytics_data_lake.agent.domain.catalog import (
+    QUERY_PARAMETERS,
+    ValidatedQuery,
+)
+from gaming_analytics_data_lake.agent.domain.models import QueryResult
 
 
 class AthenaQueryError(RuntimeError):
     """An approved query did not finish successfully."""
 
 
-@dataclass(frozen=True)
-class QueryResult:
-    columns: tuple[str, ...]
-    rows: list[dict[str, str | None]]
-
-
-def _read_date(value: object, name: str) -> date:
-    if not isinstance(value, str) or not ISO_DATE.fullmatch(value):
-        raise ValueError(f"{name} must use YYYY-MM-DD")
-    try:
-        return date.fromisoformat(value)
-    except ValueError as error:
-        raise ValueError(f"{name} must be a valid calendar date") from error
-
-
-def _execution_parameters(
-    names: tuple[str, ...], arguments: Mapping[str, object]
-) -> list[str]:
-    if arguments.keys() != set(names):
-        raise ValueError(f"Expected parameters: {', '.join(names)}")
-
-    start_date = _read_date(arguments["start_date"], "start_date")
-    end_date = _read_date(arguments["end_date"], "end_date")
-    if start_date >= end_date:
-        raise ValueError("end_date must be later than start_date")
-
-    parameters = [f"'{start_date.isoformat()}'", f"'{end_date.isoformat()}'"]
-    if "player_id" in names:
-        player_id = arguments["player_id"]
-        if not isinstance(player_id, str) or not PLAYER_ID.fullmatch(player_id):
-            raise ValueError("Invalid player_id")
-        parameters.insert(0, f"'{player_id}'")
-    return parameters
+def _encode_parameter(value: date | str | int | None) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, date):
+        return f"'{value.isoformat()}'"
+    return "'" + value.replace("'", "''") + "'"
 
 
 class AthenaQueryExecutor:
@@ -75,13 +45,10 @@ class AthenaQueryExecutor:
             for name in QUERY_PARAMETERS
         }
 
-    def execute(self, name: str, arguments: Mapping[str, object]) -> QueryResult:
-        if name not in QUERY_PARAMETERS:
-            raise ValueError("Unknown Athena query")
-
-        parameters = _execution_parameters(QUERY_PARAMETERS[name], arguments)
+    def execute(self, query: ValidatedQuery) -> QueryResult:
+        parameters = [_encode_parameter(value) for value in query.values]
         started = self.client.start_query_execution(
-            QueryString=self.queries[name],
+            QueryString=self.queries[query.name],
             ExecutionParameters=parameters,
             WorkGroup=self.workgroup,
         )
